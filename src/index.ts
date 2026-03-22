@@ -11,12 +11,15 @@ import { z } from 'zod';
 import { fetchLawData } from './scraper.js';
 import { searchLaw } from './search.js';
 import { LawData } from './types.js';
+import { InterpretationScraper } from './interpretation_scraper.js';
 
 class BuildingCodeServer {
   private server: Server;
   private lawData: LawData | null = null;
+  private interpretationScraper: InterpretationScraper;
 
   constructor() {
+    this.interpretationScraper = new InterpretationScraper();
     this.server = new Server(
       {
         name: 'taiwan-building-code-tracker',
@@ -34,6 +37,7 @@ class BuildingCodeServer {
     // Error handling
     this.server.onerror = (error) => console.error('[MCP Error]', error);
     process.on('SIGINT', async () => {
+      await this.interpretationScraper.close();
       await this.server.close();
       process.exit(0);
     });
@@ -56,6 +60,25 @@ class BuildingCodeServer {
                 type: 'number',
                 description: '回傳結果數量上限 (預設 10)',
                 default: 10,
+              },
+            },
+            required: ['query'],
+          },
+        },
+        {
+          name: 'search_building_interpretations',
+          description: '搜尋內政部國土管理署解釋函 (Taiwan Building Code Interpretations/Orders)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: '搜尋關鍵字 (例如: 採光, 違章建築, 防火避難)',
+              },
+              limit: {
+                type: 'number',
+                description: '回傳結果數量上限 (預設 5)',
+                default: 5,
               },
             },
             required: ['query'],
@@ -88,72 +111,69 @@ class BuildingCodeServer {
 
           const results = searchLaw(this.lawData.articles, query, limit);
 
-        if (results.length === 0) {
+          if (results.length === 0) {
+            return {
+              content: [{ type: 'text', text: `找不到與「${query}」相關的條文。` }],
+            };
+          }
+
+          const formattedResults = results
+            .map((r) => `【${r.chapter} / ${r.articleNum}】\n\n${r.content}\n\n---`)
+            .join('\n\n');
+
           return {
-            content: [
-              {
-                type: 'text',
-                text: `找不到與「${query}」相關的條文。`,
-              },
-            ],
+            content: [{ type: 'text', text: `搜尋到 ${results.length} 筆結果：\n\n${formattedResults}` }],
+          };
+        } else if (request.params.name === 'search_building_interpretations') {
+          const { query, limit = 5 } = z
+            .object({
+              query: z.string().min(1, '搜尋關鍵字不能為空'),
+              limit: z.number().min(1).max(20).optional(),
+            })
+            .parse(request.params.arguments);
+
+          const results = await this.interpretationScraper.search(query, limit);
+
+          if (results.length === 0) {
+            return {
+              content: [{ type: 'text', text: `找不到與「${query}」相關的解釋函。` }],
+            };
+          }
+
+          const formattedResults = results
+            .map((r) => 
+              `【標題：${r.title}】\n發文日期：${r.date}\n函號：${r.docNo}\n摘要：${r.summary}...\n網址：${r.url}\n\n---`
+            )
+            .join('\n\n');
+
+          return {
+            content: [{ 
+              type: 'text', 
+              text: `搜尋到 ${results.length} 筆解釋函結果（來源：內政部國土管理署）：\n\n${formattedResults}` 
+            }],
+          };
+        } else if (request.params.name === 'refresh_data') {
+          this.lawData = await fetchLawData(true);
+          return {
+            content: [{ type: 'text', text: '法規資料已成功更新。' }],
+          };
+        } else {
+          throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
+        }
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return {
+            content: [{ type: 'text', text: `參數錯誤: ${error.issues.map((i) => i.message).join(', ')}` }],
+            isError: true,
           };
         }
-
-        const formattedResults = results
-          .map(
-            (r) =>
-              `【${r.chapter} / ${r.articleNum}】\n\n${r.content}\n\n---`
-          )
-          .join('\n\n');
-
         return {
-          content: [
-            {
-              type: 'text',
-              text: `搜尋到 ${results.length} 筆結果：\n\n${formattedResults}`,
-            },
-          ],
-        };
-      } else if (request.params.name === 'refresh_data') {
-        this.lawData = await fetchLawData(true);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: '法規資料已成功更新。',
-            },
-          ],
-        };
-      } else {
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Unknown tool: ${request.params.name}`
-        );
-      }
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `參數錯誤: ${error.issues.map((i) => i.message).join(', ')}`,
-            },
-          ],
+          content: [{ type: 'text', text: `發生錯誤: ${error instanceof Error ? error.message : String(error)}` }],
           isError: true,
         };
       }
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `發生錯誤: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  });
-}
+    });
+  }
 
   async run() {
     const transport = new StdioServerTransport();
