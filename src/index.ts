@@ -5,6 +5,8 @@ import {
   CallToolRequestSchema,
   ErrorCode,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
@@ -23,16 +25,18 @@ class BuildingCodeServer {
     this.server = new Server(
       {
         name: 'taiwan-building-code-tracker',
-        version: '1.0.0',
+        version: '1.1.0',
       },
       {
         capabilities: {
           tools: {},
+          prompts: {},
         },
       }
     );
 
     this.setupToolHandlers();
+    this.setupPromptHandlers();
     
     // Error handling
     this.server.onerror = (error) => console.error('[MCP Error]', error);
@@ -43,22 +47,82 @@ class BuildingCodeServer {
     });
   }
 
+  private setupPromptHandlers() {
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+      prompts: [
+        {
+          name: 'analyze-building-case',
+          description: '綜合案例適法性分析 (Comprehensive Case Analysis)',
+          arguments: [
+            {
+              name: 'caseName',
+              description: '要分析的建築案例名稱 (例：陽台外推、頂樓加蓋、載重計算)',
+              required: true,
+            },
+          ],
+        },
+        {
+          name: 'track-interpretations',
+          description: '解釋函令深度追蹤 (Interpretation Deep Dive)',
+          arguments: [
+            {
+              name: 'topic',
+              description: '要追蹤的實務議題 (例：採光面積、違章認定)',
+              required: true,
+            },
+          ],
+        },
+      ],
+    }));
+
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      if (request.params.name === 'analyze-building-case') {
+        const caseName = request.params.arguments?.caseName || '未指定案例';
+        return {
+          messages: [
+            {
+              role: 'user',
+              content: {
+                type: 'text',
+                text: `請針對「${caseName}」進行法律與構造適法性分析。\n\n執行步驟：\n1. 請優先使用 search_building_code 工具尋找相關的「母法條文」。\n2. 接著使用 search_building_interpretations 工具尋找相關的「解釋函」或「解釋令」。\n3. 請對比條文與函釋，分析該案例在實務上的判定標準、可能的罰則或合法申請的路徑。\n4. 最後請務必列出所有引用的條文編號、解釋函號與原始官網 URL 連結供複查。`,
+              },
+            },
+          ],
+        };
+      } else if (request.params.name === 'track-interpretations') {
+        const topic = request.params.arguments?.topic || '未指定議題';
+        return {
+          messages: [
+            {
+              role: 'user',
+              content: {
+                type: 'text',
+                text: `請扮演專業地政與建築法律顧問，深度追蹤「${topic}」的官方見解。\n\n執行步驟：\n1. 使用 search_building_interpretations 工具檢索至少 5 筆相關函釋。\n2. 依照「發文日期」由新到舊排列。\n3. 重點分析：該議題在實務執行上的核心爭議點、近年來官方見解是否有變更、以及引用之函號與原文網址。`,
+              },
+            },
+          ],
+        };
+      }
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown prompt: ${request.params.name}`);
+    });
+  }
+
   private setupToolHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
           name: 'search_building_code',
-          description: '搜尋台灣「建築技術規則建築構造編」之母法條文 (Taiwan Building Code - Law Articles)。[注意] 僅限搜尋母法條文（如載重、受力、構造規範），搜尋關鍵字必須使用繁體中文（例：活載重、地震力、基礎構造），請由對話中萃取 1-3 個核心名詞作為關鍵字，勿輸入完整長句。',
+          description: "Search for official law articles in the 'Taiwan Building Code - Construction Works' (建築技術規則建築構造編). [IMPORTANT] The search 'query' MUST be in Traditional Chinese. Extract 1-3 core nouns from the conversation (e.g., '活載重', '地震力', '基礎構造') and use them as the query. Do not use long sentences.",
           inputSchema: {
             type: 'object',
             properties: {
               query: {
                 type: 'string',
-                description: '中文搜尋關鍵字',
+                description: 'Search keyword in Traditional Chinese.',
               },
               limit: {
                 type: 'number',
-                description: '回傳結果數量上限 (預設 10)',
+                description: 'Maximum number of results to return (default 10).',
                 default: 10,
               },
             },
@@ -67,17 +131,17 @@ class BuildingCodeServer {
         },
         {
           name: 'search_building_interpretations',
-          description: '搜尋台灣內政部國土管理署之「解釋函令/函釋」(Taiwan Building Code - Interpretations/Orders)。[注意] 用於搜尋行政解釋、實務案例、判例或補充規定。搜尋關鍵字必須使用繁體中文（例：採光、違章建築、防火避難），請由對話中萃取 1-2 個核心名詞作為關鍵字。此工具會回傳包含函號與官網連結的資訊，請務必將連結提供給使用者複查。',
+          description: "Search for official interpretations (解釋函) and administrative orders (解釋令) from the Taiwan National Land Management Agency (內政部國土管理署). [IMPORTANT] Use this tool whenever the user mentions '解釋函' or '解釋令'. The search 'query' MUST be in Traditional Chinese (e.g., '採光', '違章建築', '防火避難'). Use 1-2 core nouns from the conversation. This tool returns document numbers and official URLs; you MUST provide these URLs to the user for verification.",
           inputSchema: {
             type: 'object',
             properties: {
               query: {
                 type: 'string',
-                description: '中文搜尋關鍵字',
+                description: 'Search keyword in Traditional Chinese.',
               },
               limit: {
                 type: 'number',
-                description: '回傳結果數量上限 (預設 5)',
+                description: 'Maximum number of results to return (default 5).',
                 default: 5,
               },
             },
@@ -86,7 +150,7 @@ class BuildingCodeServer {
         },
         {
             name: 'refresh_data',
-            description: '強制重新從全國法規資料庫抓取最新法規母法條文資料，並更新本地快取。',
+            description: 'Forcefully re-fetch the latest law articles from the official database and update the local cache.',
             inputSchema: {
               type: 'object',
               properties: {},

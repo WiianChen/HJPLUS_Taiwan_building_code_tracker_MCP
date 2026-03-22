@@ -41,17 +41,17 @@ class InterpretationScraper {
     async search(query, limit = 5) {
         const page = await this.getPage();
         try {
-            console.log('正在連線至國土署解釋函系統...');
+            console.error('正在連線至國土署解釋函系統...');
             // 增加延遲與模擬行為
             await page.goto(this.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForTimeout(5000); // 等待 WAF Challenge 執行
             const title = await page.title();
-            console.log(`頁面標題: ${title}`);
+            console.error(`頁面標題: ${title}`);
             // 嘗試定位關鍵字輸入框
             // 在 Next.js 版面中，搜尋框通常在一個 form 內
             const searchInput = page.locator('input[placeholder*="關鍵字"], input#keyword, input[type="text"]').first();
             if (await searchInput.count() === 0) {
-                console.log('找不到搜尋框，嘗試截圖...');
+                console.error('找不到搜尋框，嘗試截圖...');
                 await page.screenshot({ path: 'waf_blocked.png' });
                 return [];
             }
@@ -61,7 +61,7 @@ class InterpretationScraper {
             // 點擊搜尋
             const searchBtn = page.locator('button:has-text("查詢"), .btn-primary').first();
             await searchBtn.click();
-            console.log('已送出查詢，等待結果渲染...');
+            console.error('已送出查詢，等待結果渲染...');
             await page.waitForTimeout(5000);
             // 解析結果
             const results = await page.evaluate(() => {
@@ -81,7 +81,7 @@ class InterpretationScraper {
                 });
                 return items;
             });
-            console.log(`找到 ${results.length} 筆原始結果。`);
+            console.error(`找到 ${results.length} 筆原始結果。`);
             return results
                 .filter((v, i, a) => a.findIndex(t => t.url === v.url) === i) // 去重
                 .slice(0, limit)
