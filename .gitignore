@@ -1,0 +1,25 @@
+# Node modules
+node_modules/
+
+# Build output
+dist/
+
+# Local data / Cache
+data/law_cache.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Debug images (Playwright)
+*.png
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Temp files
+tmp_*.html
+*.tmp
