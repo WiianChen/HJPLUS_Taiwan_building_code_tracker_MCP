@@ -134,15 +134,6 @@ class BuildingCodeServer {
         });
     }
     async run() {
-        // Pre-fetch data
-        try {
-            console.error('Initializing law data...');
-            this.lawData = await (0, scraper_js_1.fetchLawData)();
-            console.error('Law data loaded successfully.');
-        }
-        catch (error) {
-            console.error('Failed to load law data:', error);
-        }
         const transport = new stdio_js_1.StdioServerTransport();
         await this.server.connect(transport);
         console.error('Taiwan Building Code Tracker MCP server running on stdio');
