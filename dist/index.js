@@ -7,10 +7,13 @@ const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const zod_1 = require("zod");
 const scraper_js_1 = require("./scraper.js");
 const search_js_1 = require("./search.js");
+const interpretation_scraper_js_1 = require("./interpretation_scraper.js");
 class BuildingCodeServer {
     server;
     lawData = null;
+    interpretationScraper;
     constructor() {
+        this.interpretationScraper = new interpretation_scraper_js_1.InterpretationScraper();
         this.server = new index_js_1.Server({
             name: 'taiwan-building-code-tracker',
             version: '1.0.0',
@@ -23,6 +26,7 @@ class BuildingCodeServer {
         // Error handling
         this.server.onerror = (error) => console.error('[MCP Error]', error);
         process.on('SIGINT', async () => {
+            await this.interpretationScraper.close();
             await this.server.close();
             process.exit(0);
         });
@@ -44,6 +48,25 @@ class BuildingCodeServer {
                                 type: 'number',
                                 description: '回傳結果數量上限 (預設 10)',
                                 default: 10,
+                            },
+                        },
+                        required: ['query'],
+                    },
+                },
+                {
+                    name: 'search_building_interpretations',
+                    description: '搜尋內政部國土管理署解釋函 (Taiwan Building Code Interpretations/Orders)',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            query: {
+                                type: 'string',
+                                description: '搜尋關鍵字 (例如: 採光, 違章建築, 防火避難)',
+                            },
+                            limit: {
+                                type: 'number',
+                                description: '回傳結果數量上限 (預設 5)',
+                                default: 5,
                             },
                         },
                         required: ['query'],
@@ -74,35 +97,43 @@ class BuildingCodeServer {
                     const results = (0, search_js_1.searchLaw)(this.lawData.articles, query, limit);
                     if (results.length === 0) {
                         return {
-                            content: [
-                                {
-                                    type: 'text',
-                                    text: `找不到與「${query}」相關的條文。`,
-                                },
-                            ],
+                            content: [{ type: 'text', text: `找不到與「${query}」相關的條文。` }],
                         };
                     }
                     const formattedResults = results
                         .map((r) => `【${r.chapter} / ${r.articleNum}】\n\n${r.content}\n\n---`)
                         .join('\n\n');
                     return {
-                        content: [
-                            {
+                        content: [{ type: 'text', text: `搜尋到 ${results.length} 筆結果：\n\n${formattedResults}` }],
+                    };
+                }
+                else if (request.params.name === 'search_building_interpretations') {
+                    const { query, limit = 5 } = zod_1.z
+                        .object({
+                        query: zod_1.z.string().min(1, '搜尋關鍵字不能為空'),
+                        limit: zod_1.z.number().min(1).max(20).optional(),
+                    })
+                        .parse(request.params.arguments);
+                    const results = await this.interpretationScraper.search(query, limit);
+                    if (results.length === 0) {
+                        return {
+                            content: [{ type: 'text', text: `找不到與「${query}」相關的解釋函。` }],
+                        };
+                    }
+                    const formattedResults = results
+                        .map((r) => `【標題：${r.title}】\n發文日期：${r.date}\n函號：${r.docNo}\n摘要：${r.summary}...\n網址：${r.url}\n\n---`)
+                        .join('\n\n');
+                    return {
+                        content: [{
                                 type: 'text',
-                                text: `搜尋到 ${results.length} 筆結果：\n\n${formattedResults}`,
-                            },
-                        ],
+                                text: `搜尋到 ${results.length} 筆解釋函結果（來源：內政部國土管理署）：\n\n${formattedResults}`
+                            }],
                     };
                 }
                 else if (request.params.name === 'refresh_data') {
                     this.lawData = await (0, scraper_js_1.fetchLawData)(true);
                     return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: '法規資料已成功更新。',
-                            },
-                        ],
+                        content: [{ type: 'text', text: '法規資料已成功更新。' }],
                     };
                 }
                 else {
@@ -112,22 +143,12 @@ class BuildingCodeServer {
             catch (error) {
                 if (error instanceof zod_1.z.ZodError) {
                     return {
-                        content: [
-                            {
-                                type: 'text',
-                                text: `參數錯誤: ${error.issues.map((i) => i.message).join(', ')}`,
-                            },
-                        ],
+                        content: [{ type: 'text', text: `參數錯誤: ${error.issues.map((i) => i.message).join(', ')}` }],
                         isError: true,
                     };
                 }
                 return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: `發生錯誤: ${error instanceof Error ? error.message : String(error)}`,
-                        },
-                    ],
+                    content: [{ type: 'text', text: `發生錯誤: ${error instanceof Error ? error.message : String(error)}` }],
                     isError: true,
                 };
             }
