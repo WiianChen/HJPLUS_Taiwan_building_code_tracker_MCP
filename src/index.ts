@@ -73,19 +73,20 @@ class BuildingCodeServer {
     }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      if (request.params.name === 'search_building_code') {
-        const { query, limit = 10 } = z
-          .object({
-            query: z.string(),
-            limit: z.number().optional(),
-          })
-          .parse(request.params.arguments);
+      try {
+        if (request.params.name === 'search_building_code') {
+          const { query, limit = 10 } = z
+            .object({
+              query: z.string().min(1, '搜尋關鍵字不能為空').max(100, '關鍵字過長，上限 100 字'),
+              limit: z.number().min(1).max(50).optional(),
+            })
+            .parse(request.params.arguments);
 
-        if (!this.lawData) {
-          this.lawData = await fetchLawData();
-        }
+          if (!this.lawData) {
+            this.lawData = await fetchLawData();
+          }
 
-        const results = searchLaw(this.lawData.articles, query, limit);
+          const results = searchLaw(this.lawData.articles, query, limit);
 
         if (results.length === 0) {
           return {
@@ -129,8 +130,30 @@ class BuildingCodeServer {
           `Unknown tool: ${request.params.name}`
         );
       }
-    });
-  }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `參數錯誤: ${error.issues.map((i) => i.message).join(', ')}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `發生錯誤: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  });
+}
 
   async run() {
     // Pre-fetch data

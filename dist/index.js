@@ -60,52 +60,76 @@ class BuildingCodeServer {
             ],
         }));
         this.server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
-            if (request.params.name === 'search_building_code') {
-                const { query, limit = 10 } = zod_1.z
-                    .object({
-                    query: zod_1.z.string(),
-                    limit: zod_1.z.number().optional(),
-                })
-                    .parse(request.params.arguments);
-                if (!this.lawData) {
-                    this.lawData = await (0, scraper_js_1.fetchLawData)();
-                }
-                const results = (0, search_js_1.searchLaw)(this.lawData.articles, query, limit);
-                if (results.length === 0) {
+            try {
+                if (request.params.name === 'search_building_code') {
+                    const { query, limit = 10 } = zod_1.z
+                        .object({
+                        query: zod_1.z.string().min(1, '搜尋關鍵字不能為空').max(100, '關鍵字過長，上限 100 字'),
+                        limit: zod_1.z.number().min(1).max(50).optional(),
+                    })
+                        .parse(request.params.arguments);
+                    if (!this.lawData) {
+                        this.lawData = await (0, scraper_js_1.fetchLawData)();
+                    }
+                    const results = (0, search_js_1.searchLaw)(this.lawData.articles, query, limit);
+                    if (results.length === 0) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: `找不到與「${query}」相關的條文。`,
+                                },
+                            ],
+                        };
+                    }
+                    const formattedResults = results
+                        .map((r) => `【${r.chapter} / ${r.articleNum}】\n\n${r.content}\n\n---`)
+                        .join('\n\n');
                     return {
                         content: [
                             {
                                 type: 'text',
-                                text: `找不到與「${query}」相關的條文。`,
+                                text: `搜尋到 ${results.length} 筆結果：\n\n${formattedResults}`,
                             },
                         ],
                     };
                 }
-                const formattedResults = results
-                    .map((r) => `【${r.chapter} / ${r.articleNum}】\n\n${r.content}\n\n---`)
-                    .join('\n\n');
+                else if (request.params.name === 'refresh_data') {
+                    this.lawData = await (0, scraper_js_1.fetchLawData)(true);
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: '法規資料已成功更新。',
+                            },
+                        ],
+                    };
+                }
+                else {
+                    throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
+                }
+            }
+            catch (error) {
+                if (error instanceof zod_1.z.ZodError) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `參數錯誤: ${error.issues.map((i) => i.message).join(', ')}`,
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
                 return {
                     content: [
                         {
                             type: 'text',
-                            text: `搜尋到 ${results.length} 筆結果：\n\n${formattedResults}`,
+                            text: `發生錯誤: ${error instanceof Error ? error.message : String(error)}`,
                         },
                     ],
+                    isError: true,
                 };
-            }
-            else if (request.params.name === 'refresh_data') {
-                this.lawData = await (0, scraper_js_1.fetchLawData)(true);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: '法規資料已成功更新。',
-                        },
-                    ],
-                };
-            }
-            else {
-                throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
             }
         });
     }
