@@ -192,13 +192,13 @@ async function checkAndConditionalUpdate() {
     await fs.writeFile(projectChangelogPath, changelogMd, 'utf-8');
     console.log(`[Check Update] 變更明細已寫入至專案根目錄: ${projectChangelogPath}`);
     
-    // Save to Obsidian vault root
-    const obsidianChangelogPath = path.join(localVaultPath, changelogName);
+    // Save to Obsidian vault's 臺灣法規 directory
+    const obsidianChangelogPath = path.join(localVaultPath, '臺灣法規', changelogName);
     try {
       await fs.writeFile(obsidianChangelogPath, changelogMd, 'utf-8');
-      console.log(`[Check Update] 變更明細已寫入至 Obsidian 根目錄: ${obsidianChangelogPath}`);
+      console.log(`[Check Update] 變更明細已寫入至 Obsidian 臺灣法規目錄: ${obsidianChangelogPath}`);
     } catch (err) {
-      console.error(`[Check Update Error] 無法寫入變更明細至 Obsidian 根目錄:`, err instanceof Error ? err.message : String(err));
+      console.error(`[Check Update Error] 無法寫入變更明細至 Obsidian 臺灣法規目錄:`, err instanceof Error ? err.message : String(err));
     }
     
     // Save processed URLs so we don't repeat them next time
