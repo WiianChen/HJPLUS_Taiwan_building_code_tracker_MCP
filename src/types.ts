@@ -1,7 +1,9 @@
 export interface Article {
+  lawName: string;
   chapter: string;
   articleNum: string;
   content: string;
+  url?: string;
 }
 
 export interface LawData {

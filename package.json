@@ -3,10 +3,15 @@
   "version": "1.0.0",
   "description": "這是用來放開發樣板用的repo",
   "type": "commonjs",
+  "bin": {
+    "taiwan-building-code": "./dist/index.js"
+  },
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "check-update": "tsx src/check_update.ts",
+    "sync-obsidian": "tsx src/sync_obsidian.ts"
   },
   "repository": {
     "type": "git",

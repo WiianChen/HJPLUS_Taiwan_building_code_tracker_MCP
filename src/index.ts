@@ -10,10 +10,14 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import fs from 'fs/promises';
+import path from 'path';
 import { fetchLawData } from './scraper.js';
 import { searchLaw } from './search.js';
 import { LawData } from './types.js';
 import { InterpretationScraper } from './interpretation_scraper.js';
+
+
 
 class BuildingCodeServer {
   private server: Server;
@@ -149,13 +153,14 @@ class BuildingCodeServer {
           },
         },
         {
-            name: 'refresh_data',
-            description: 'Forcefully re-fetch the latest law articles from the official database and update the local cache.',
-            inputSchema: {
-              type: 'object',
-              properties: {},
-            },
+          name: 'refresh_data',
+          description: 'Forcefully re-fetch the latest law articles from the official database and update the local cache.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
           },
+        },
+
       ],
     }));
 
@@ -182,7 +187,7 @@ class BuildingCodeServer {
           }
 
           const formattedResults = results
-            .map((r) => `【${r.chapter} / ${r.articleNum}】\n\n${r.content}\n\n---`)
+            .map((r) => `【${r.lawName} / ${r.chapter} / ${r.articleNum}】\n\n${r.content}${r.url ? `\n來源網址: ${r.url}` : ''}\n\n---`)
             .join('\n\n');
 
           return {
@@ -221,6 +226,7 @@ class BuildingCodeServer {
           return {
             content: [{ type: 'text', text: '法規資料已成功更新。' }],
           };
+
         } else {
           throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
         }
