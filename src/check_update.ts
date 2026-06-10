@@ -187,11 +187,6 @@ async function checkAndConditionalUpdate() {
     
     changelogMd += `\n請前往您的 Obsidian 知識庫的 \`臺灣法規\` 目錄查看最新同步的條文筆記。\n`;
     
-    // Save to project root
-    const projectChangelogPath = path.join(process.cwd(), changelogName);
-    await fs.writeFile(projectChangelogPath, changelogMd, 'utf-8');
-    console.log(`[Check Update] 變更明細已寫入至專案根目錄: ${projectChangelogPath}`);
-    
     // Save to Obsidian vault's 臺灣法規 directory
     const obsidianChangelogPath = path.join(localVaultPath, '臺灣法規', changelogName);
     try {
