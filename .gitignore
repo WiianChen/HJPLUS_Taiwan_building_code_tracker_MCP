@@ -5,7 +5,7 @@ node_modules/
 dist/
 
 # Local data / Cache
-data/law_cache.json
+data/
 
 # Logs
 *.log

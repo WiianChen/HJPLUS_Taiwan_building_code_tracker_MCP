@@ -7,7 +7,7 @@ const CACHE_FILE = path.join(process.cwd(), 'data', 'law_cache.json');
 const DEFAULT_VAULT_PATH = 'H:\\Obsidian資料庫\\Secondbrain';
 const TARGET_SUBDIR = '臺灣法規';
 
-export async function syncToObsidian(customVaultPath?: string) {
+export async function syncToObsidian(customVaultPath?: string, targetLawNames?: string[]) {
   console.log('[Obsidian Sync] 正在啟動同步程序...');
 
   // 1. Read the cache file
@@ -45,10 +45,18 @@ export async function syncToObsidian(customVaultPath?: string) {
   let fileCount = 0;
 
   for (const [lawName, lawArticles] of lawMap.entries()) {
+    if (targetLawNames && !targetLawNames.includes(lawName)) {
+      continue;
+    }
     // Look up metadata (authority and original URL) from LAWS
     const metadata = LAWS.find(l => l.name === lawName);
     const authority = metadata?.authority || '其他';
     const originalUrl = metadata?.url || '';
+
+    // Get crawled date and docNo from the first article, fallback to laws.ts
+    const firstArticle = lawArticles[0];
+    const lawDate = firstArticle?.date || metadata?.date || '';
+    const lawDocNo = firstArticle?.docNo || metadata?.docNo || '';
 
     // Create authority folder
     const authorityDir = path.join(syncDestPath, authority);
@@ -64,6 +72,12 @@ export async function syncToObsidian(customVaultPath?: string) {
     if (originalUrl) {
       mdContent += `url: "${originalUrl}"\n`;
     }
+    if (lawDate) {
+      mdContent += `date: "${lawDate}"\n`;
+    }
+    if (lawDocNo) {
+      mdContent += `docNo: "${lawDocNo}"\n`;
+    }
     mdContent += `last_updated: "${lawData.lastUpdated}"\n`;
     mdContent += `sync_time: "${new Date().toISOString()}"\n`;
     mdContent += '---\n\n';
@@ -71,6 +85,12 @@ export async function syncToObsidian(customVaultPath?: string) {
     mdContent += `# ${lawName}\n\n`;
     mdContent += `> [!NOTE] 法規基本資訊\n`;
     mdContent += `> * **主管機關**：${authority}\n`;
+    if (lawDate) {
+      mdContent += `> * **發布/修正日期**：${lawDate}\n`;
+    }
+    if (lawDocNo) {
+      mdContent += `> * **發文字號**：${lawDocNo}\n`;
+    }
     if (originalUrl) {
       mdContent += `> * **官方來源**：[全國法規資料庫/主管系統連結](${originalUrl})\n`;
     }

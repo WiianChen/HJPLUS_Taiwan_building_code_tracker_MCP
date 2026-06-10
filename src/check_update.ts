@@ -62,8 +62,19 @@ async function checkAndConditionalUpdate() {
 
   const matchedLawsMap = new Map<string, { announcementTitle: string; url: string; portal: string }>();
 
+  // Load processed announcements
+  const PROCESSED_FILE = path.join(process.cwd(), 'data', 'processed_announcements.json');
+  let processedUrls: string[] = [];
   try {
-    for (const portal of ANNOUNCEMENT_PAGES) {
+    const content = await fs.readFile(PROCESSED_FILE, 'utf-8');
+    processedUrls = JSON.parse(content);
+  } catch (err) {
+    // Start empty if file doesn't exist
+  }
+
+  try {
+    // Perform portal checks concurrently using Promise.all
+    await Promise.all(ANNOUNCEMENT_PAGES.map(async (portal) => {
       console.log(`[Check Update] 正在讀取 ${portal.name}: ${portal.url}`);
       const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -101,6 +112,10 @@ async function checkAndConditionalUpdate() {
 
         // Compare with our tracked laws list
         for (const ann of announcements) {
+          // Skip if this announcement has already been processed
+          if (processedUrls.includes(ann.href)) {
+            continue;
+          }
           for (const law of LAWS) {
             if (ann.text.includes(law.name)) {
               if (!matchedLawsMap.has(law.name)) {
@@ -119,7 +134,7 @@ async function checkAndConditionalUpdate() {
         await page.close();
         await context.close();
       }
-    }
+    }));
 
     if (matchedLawsMap.size === 0) {
       console.log('[Check Update] 比對完成。沒有發現任何我們所追蹤之法規的更新公告。快取無須更新。');
@@ -135,12 +150,23 @@ async function checkAndConditionalUpdate() {
 
     // Run the specific scrapers for these laws
     console.log('[Check Update] 啟動局部爬蟲更新受影響的法規...');
-    await updateLawsByName(matchedLawNames);
+    const updatedCache = await updateLawsByName(matchedLawNames);
     console.log('[Check Update] 局部更新完成。');
 
-    // Run Obsidian sync to ensure the markdown files are updated
+    // Run Obsidian sync to ensure the markdown files are updated (incremental sync)
     console.log('[Check Update] 正在同步變更至 Obsidian...');
-    await syncToObsidian();
+    await syncToObsidian(undefined, matchedLawNames);
+
+    // Map updated info including date and docNo
+    const matchedLawsInfo = new Map<string, { announcementTitle: string; url: string; portal: string; date?: string; docNo?: string }>();
+    for (const [lawName, info] of matchedLawsMap.entries()) {
+      const art = updatedCache.articles.find(a => a.lawName === lawName);
+      matchedLawsInfo.set(lawName, {
+        ...info,
+        date: art?.date,
+        docNo: art?.docNo
+      });
+    }
 
     // Generate 變更明細.md
     console.log('[Check Update] 正在生成變更明細...');
@@ -151,11 +177,12 @@ async function checkAndConditionalUpdate() {
     let changelogMd = `# 臺灣法規更新變更明細\n\n`;
     changelogMd += `更新時間：${checkDateStr}\n\n`;
     changelogMd += `本機排程已於今日自動完成以下法規的爬取更新與 Obsidian 同步：\n\n`;
-    changelogMd += `| 異動法規 | 來源門戶 | 公告內容 | 公告連結 |\n`;
-    changelogMd += `| --- | --- | --- | --- |\n`;
+    changelogMd += `| 異動法規 | 發布/修正日期 | 來源門戶 | 公告內容 | 公告連結 |\n`;
+    changelogMd += `| --- | --- | --- | --- | --- |\n`;
     
-    for (const [lawName, info] of matchedLawsMap.entries()) {
-      changelogMd += `| **${lawName}** | ${info.portal} | ${info.announcementTitle} | [連結](${info.url}) |\n`;
+    for (const [lawName, info] of matchedLawsInfo.entries()) {
+      const displayDate = info.date || '未知';
+      changelogMd += `| **${lawName}** | ${displayDate} | ${info.portal} | ${info.announcementTitle} | [連結](${info.url}) |\n`;
     }
     
     changelogMd += `\n請前往您的 Obsidian 知識庫的 \`臺灣法規\` 目錄查看最新同步的條文筆記。\n`;
@@ -174,12 +201,33 @@ async function checkAndConditionalUpdate() {
       console.error(`[Check Update Error] 無法寫入變更明細至 Obsidian 根目錄:`, err instanceof Error ? err.message : String(err));
     }
     
+    // Save processed URLs so we don't repeat them next time
+    for (const info of matchedLawsMap.values()) {
+      if (!processedUrls.includes(info.url)) {
+        processedUrls.push(info.url);
+      }
+    }
+    if (processedUrls.length > 500) {
+      processedUrls = processedUrls.slice(processedUrls.length - 500);
+    }
+    await fs.mkdir(path.dirname(PROCESSED_FILE), { recursive: true });
+    await fs.writeFile(PROCESSED_FILE, JSON.stringify(processedUrls, null, 2), 'utf-8');
+    console.log(`[Check Update] 已處理公告清單已更新並存入: ${PROCESSED_FILE}`);
+
     // Trigger Windows popup MessageBox via PowerShell
     console.log('[Check Update] 觸發 Windows 系統彈出提示視窗...');
-    const popupMsg = `【台灣建築法規更新通知】\\n\\n法規資料庫已於今日完成自動檢查與更新！\\n\\n發現有 ${matchedLawsMap.size} 個法規發生異動，已為您同步至 Obsidian 筆記中。\\n\\n詳細更新內容已寫入至『變更明細.md』，請點選確定後前往查看。`;
+    
+    let lawDetailsStr = '';
+    for (const [lawName, info] of matchedLawsInfo.entries()) {
+      const dateStr = info.date ? ` (發布日期：${info.date})` : '';
+      lawDetailsStr += `- ${lawName}${dateStr}\\n`;
+    }
+
+    const popupMsg = `【台灣建築法規更新通知】\\n\\n法規資料庫已於今日完成自動檢查與更新！\\n\\n發現有 ${matchedLawsMap.size} 個法規發生異動：\\n${lawDetailsStr}\\n已為您同步至 Obsidian 筆記中。\\n\\n詳細更新內容已寫入至『變更明細.md』，請點選確定後前往查看。`;
+    const safePopupMsg = popupMsg.replace(/'/g, "''"); // escape single quotes for PowerShell
     const popupTitle = '台灣建築法規自動更新通知';
     
-    const psCommand = `powershell -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); [System.Windows.Forms.MessageBox]::Show('${popupMsg}', '${popupTitle}', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)"`;
+    const psCommand = `powershell -Command "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); [System.Windows.Forms.MessageBox]::Show('${safePopupMsg}'.Replace('\\n', [Environment]::NewLine), '${popupTitle}', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)"`;
     
     exec(psCommand, (error) => {
       if (error) {

@@ -57,6 +57,52 @@ function parseArticles(lawName: string, url: string, text: string): Article[] {
   return articles;
 }
 
+async function scrapeMetadata(page: any): Promise<{ date?: string; docNo?: string }> {
+  try {
+    const meta = await page.evaluate(() => {
+      let date = '';
+      let docNo = '';
+      const ths = Array.from(document.querySelectorAll('th'));
+      for (const th of ths) {
+        const label = (th as any).innerText.trim();
+        const td = th.nextElementSibling as any;
+        if (td) {
+          const val = td.innerText.trim();
+          if (label.includes('修正日期') && val) {
+            date = val;
+          } else if ((label.includes('公發布日') || label.includes('發布日期')) && !date && val) {
+            date = val;
+          } else if (label.includes('發文字號') && val) {
+            docNo = val;
+          }
+        }
+      }
+      
+      // Fallback: search the whole body text
+      if (!date) {
+        const text = document.body.innerText;
+        const amdMatch = text.match(/修正日期：\s*(民國\s*\d+\s*年\s*\d+\s*月\s*\d+\s*日|\d{4}\/\d{2}\/\d{2})/);
+        const pubMatch = text.match(/公?發布日(期)?：\s*(民國\s*\d+\s*年\s*\d+\s*月\s*\d+\s*日|\d{4}\/\d{2}\/\d{2})/);
+        if (amdMatch) {
+          date = amdMatch[1];
+        } else if (pubMatch) {
+          date = pubMatch[2];
+        }
+        
+        const docMatch = text.match(/發文字號：\s*(.*)/);
+        if (docMatch && !docNo) {
+          docNo = docMatch[1].trim();
+        }
+      }
+      return { date, docNo };
+    });
+    return meta;
+  } catch (err) {
+    console.error('[Scraper Metadata Error] 無法讀取網頁中記資料:', err);
+    return {};
+  }
+}
+
 export async function fetchLawData(forceRefresh = false): Promise<LawData> {
   if (!forceRefresh) {
     try {
@@ -110,22 +156,31 @@ export async function fetchLawData(forceRefresh = false): Promise<LawData> {
         await page.goto(law.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.waitForTimeout(2000); // 讓頁面有時間渲染
         
+        const meta = await scrapeMetadata(page);
+
         const hasContent = await page.locator('.law-reg-content').count() > 0;
+        let parsed: Article[] = [];
         if (hasContent) {
           const text = await page.locator('.law-reg-content').innerText();
-          const parsed = parseArticles(law.name, law.url, text);
+          parsed = parseArticles(law.name, law.url, text);
           console.error(`[Scraper] 成功解析了 ${parsed.length} 筆條文。`);
-          allArticles.push(...parsed);
         } else {
           // 嘗試 fallback，取 body 的內文
           const text = await page.evaluate(() => document.body.innerText);
-          const parsed = parseArticles(law.name, law.url, text);
+          parsed = parseArticles(law.name, law.url, text);
           if (parsed.length > 0) {
             console.error(`[Scraper Warning] 未找到 .law-reg-content，但成功利用 body 內文解析出 ${parsed.length} 筆條文。`);
-            allArticles.push(...parsed);
           } else {
             console.error(`[Scraper Error] 無法解析法規內容: ${law.name}`);
           }
+        }
+
+        if (parsed.length > 0) {
+          parsed.forEach(art => {
+            if (meta.date) art.date = meta.date;
+            if (meta.docNo) art.docNo = meta.docNo;
+          });
+          allArticles.push(...parsed);
         }
       } catch (error) {
         console.error(`[Scraper Error] 爬取 ${law.name} 發生錯誤:`, error instanceof Error ? error.message : String(error));
@@ -214,6 +269,8 @@ export async function updateLawsByName(lawNamesToUpdate: string[]): Promise<LawD
         await page.goto(law.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.waitForTimeout(2000);
         
+        const meta = await scrapeMetadata(page);
+
         const hasContent = await page.locator('.law-reg-content').count() > 0;
         let text = '';
         if (hasContent) {
@@ -224,6 +281,10 @@ export async function updateLawsByName(lawNamesToUpdate: string[]): Promise<LawD
 
         const parsed = parseArticles(law.name, law.url, text);
         if (parsed.length > 0) {
+          parsed.forEach(art => {
+            if (meta.date) art.date = meta.date;
+            if (meta.docNo) art.docNo = meta.docNo;
+          });
           console.error(`[Scraper] 成功解析了 ${parsed.length} 筆條文。`);
           updatedArticlesMap.set(law.name, parsed);
         } else {

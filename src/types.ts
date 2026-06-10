@@ -4,6 +4,8 @@ export interface Article {
   articleNum: string;
   content: string;
   url?: string;
+  date?: string;
+  docNo?: string;
 }
 
 export interface LawData {

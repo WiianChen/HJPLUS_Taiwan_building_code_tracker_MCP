@@ -591,11 +591,15 @@ export const LAWS: LawMetadata[] = [
   {
     name: "非都市土地開發審議作業規範",
     url: "https://glrs.moi.gov.tw/LawContent.aspx?id=FL003635",
-    authority: "內政部國土署"
+    authority: "內政部國土署",
+    date: "111.05.20",
+    docNo: "台內營字第1110807961號令"
   },
   {
     name: "非都市土地使用分區及使用地變更申請案件委辦直轄市縣（市）政府審查作業要點",
     url: "https://glrs.moi.gov.tw/LawContent.aspx?id=FL048890",
-    authority: "內政部國土署"
+    authority: "內政部國土署",
+    date: "107.08.17",
+    docNo: "台內營字第1070813350號令"
   }
 ];
