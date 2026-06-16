@@ -17,3 +17,15 @@ export interface LawData {
 export interface SearchResult extends Article {
   score: number;
 }
+
+export interface ArticleDiff {
+  articleNum: string;
+  oldContent: string;
+  newContent: string;
+  isNew: boolean;
+}
+
+export interface LawDiff {
+  lawName: string;
+  changes: ArticleDiff[];
+}

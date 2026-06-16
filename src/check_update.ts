@@ -150,22 +150,42 @@ async function checkAndConditionalUpdate() {
 
     // Run the specific scrapers for these laws
     console.log('[Check Update] 啟動局部爬蟲更新受影響的法規...');
-    const updatedCache = await updateLawsByName(matchedLawNames);
+    const { updatedCache, diffs } = await updateLawsByName(matchedLawNames);
     console.log('[Check Update] 局部更新完成。');
+
+    if (diffs.length === 0) {
+      console.log('[Check Update] 雖然政府有新公告，但條文實質內容未變。更新 processedUrls 後結束，不彈出通知。');
+      for (const info of matchedLawsMap.values()) {
+        if (!processedUrls.includes(info.url)) {
+          processedUrls.push(info.url);
+        }
+      }
+      if (processedUrls.length > 500) {
+        processedUrls = processedUrls.slice(processedUrls.length - 500);
+      }
+      await fs.mkdir(path.dirname(PROCESSED_FILE), { recursive: true });
+      await fs.writeFile(PROCESSED_FILE, JSON.stringify(processedUrls, null, 2), 'utf-8');
+      return;
+    }
+
+    // Since we have actual diffs, only sync the ones that actually changed
+    const actuallyChangedLawNames = diffs.map(d => d.lawName);
 
     // Run Obsidian sync to ensure the markdown files are updated (incremental sync)
     console.log('[Check Update] 正在同步變更至 Obsidian...');
-    await syncToObsidian(undefined, matchedLawNames);
+    await syncToObsidian(undefined, actuallyChangedLawNames);
 
     // Map updated info including date and docNo
     const matchedLawsInfo = new Map<string, { announcementTitle: string; url: string; portal: string; date?: string; docNo?: string }>();
     for (const [lawName, info] of matchedLawsMap.entries()) {
-      const art = updatedCache.articles.find(a => a.lawName === lawName);
-      matchedLawsInfo.set(lawName, {
-        ...info,
-        date: art?.date,
-        docNo: art?.docNo
-      });
+      if (actuallyChangedLawNames.includes(lawName)) {
+        const art = updatedCache.articles.find(a => a.lawName === lawName);
+        matchedLawsInfo.set(lawName, {
+          ...info,
+          date: art?.date,
+          docNo: art?.docNo
+        });
+      }
     }
 
     // Generate 變更明細.md
@@ -185,6 +205,18 @@ async function checkAndConditionalUpdate() {
       changelogMd += `| **${lawName}** | ${displayDate} | ${info.portal} | ${info.announcementTitle} | [連結](${info.url}) |\n`;
     }
     
+    changelogMd += `\n## 條文變更詳情\n\n`;
+    for (const diff of diffs) {
+      changelogMd += `### ${diff.lawName}\n\n`;
+      for (const change of diff.changes) {
+        if (change.isNew) {
+          changelogMd += `#### ${change.articleNum} (新增)\n\n**新內容：**\n\`\`\`text\n${change.newContent}\n\`\`\`\n\n`;
+        } else {
+          changelogMd += `#### ${change.articleNum} (修改)\n\n**舊內容：**\n\`\`\`text\n${change.oldContent}\n\`\`\`\n\n**新內容：**\n\`\`\`text\n${change.newContent}\n\`\`\`\n\n`;
+        }
+      }
+    }
+
     changelogMd += `\n請前往您的 Obsidian 知識庫的 \`臺灣法規\` 目錄查看最新同步的條文筆記。\n`;
     
     // Save to Obsidian vault's 臺灣法規 directory
@@ -213,12 +245,21 @@ async function checkAndConditionalUpdate() {
     console.log('[Check Update] 觸發 Windows 系統彈出提示視窗...');
     
     let lawDetailsStr = '';
-    for (const [lawName, info] of matchedLawsInfo.entries()) {
-      const dateStr = info.date ? ` (發布日期：${info.date})` : '';
-      lawDetailsStr += `- ${lawName}${dateStr}\\n`;
+    for (const diff of diffs) {
+      const info = matchedLawsInfo.get(diff.lawName);
+      const dateStr = info?.date ? ` (日期：${info.date})` : '';
+      const changedArts = diff.changes.map(c => c.articleNum).join(', ');
+      
+      // Extract a short snippet from the first changed article
+      const firstChange = diff.changes[0];
+      const snippet = firstChange.newContent.length > 100 
+        ? firstChange.newContent.substring(0, 100).replace(/\n/g, ' ') + '...'
+        : firstChange.newContent.replace(/\n/g, ' ');
+
+      lawDetailsStr += `✅ 【${diff.lawName}】${dateStr}\\n異動條文：${changedArts}\\n內容摘要：${snippet}\\n\\n`;
     }
 
-    const popupMsg = `【台灣建築法規更新通知】\\n\\n法規資料庫已於今日完成自動檢查與更新！\\n\\n發現有 ${matchedLawsMap.size} 個法規發生異動：\\n${lawDetailsStr}\\n已為您同步至 Obsidian 筆記中。\\n\\n詳細更新內容已寫入至『變更明細.md』，請點選確定後前往查看。`;
+    const popupMsg = `【台灣建築法規更新通知】\\n\\n發現有 ${diffs.length} 個法規發生實質內容異動：\\n\\n${lawDetailsStr}完整的新舊比對細節已寫入 Obsidian 的『變更明細.md』，請前往查看。`;
     const safePopupMsg = popupMsg.replace(/'/g, "''"); // escape single quotes for PowerShell
     const popupTitle = '台灣建築法規自動更新通知';
     

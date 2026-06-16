@@ -1,7 +1,7 @@
 import { chromium, Browser } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
-import { LawData, Article } from './types.js';
+import { LawData, Article, LawDiff, ArticleDiff } from './types.js';
 import { LAWS } from './laws.js';
 
 const CACHE_FILE = path.join(process.cwd(), 'data', 'law_cache.json');
@@ -206,7 +206,7 @@ export async function fetchLawData(forceRefresh = false): Promise<LawData> {
   return lawData;
 }
 
-export async function updateLawsByName(lawNamesToUpdate: string[]): Promise<LawData> {
+export async function updateLawsByName(lawNamesToUpdate: string[]): Promise<{ updatedCache: LawData, diffs: LawDiff[] }> {
   let cachedData: LawData = {
     lawName: '綜合建築與工程法規資料庫',
     lastUpdated: new Date().toISOString(),
@@ -226,7 +226,7 @@ export async function updateLawsByName(lawNamesToUpdate: string[]): Promise<LawD
   const targetLaws = LAWS.filter(law => lawNamesToUpdate.includes(law.name));
   if (targetLaws.length === 0) {
     console.error(`[Scraper] 沒有找到任何相符的法規以進行局部更新。`);
-    return cachedData;
+    return { updatedCache: cachedData, diffs: [] };
   }
 
   console.error(`開始使用 Playwright 進行局部更新，目標法規：${targetLaws.map(l => l.name).join(', ')}`);
@@ -301,9 +301,37 @@ export async function updateLawsByName(lawNamesToUpdate: string[]): Promise<LawD
     await browser.close();
   }
 
-  // Merge back
+  // Calculate diffs and merge back
   let finalArticles = cachedData.articles;
+  const allDiffs: LawDiff[] = [];
+
   for (const [lawName, newArticles] of updatedArticlesMap.entries()) {
+    const oldArticles = finalArticles.filter(art => art.lawName === lawName);
+    const changes: ArticleDiff[] = [];
+
+    for (const newArt of newArticles) {
+      const oldArt = oldArticles.find(a => a.articleNum === newArt.articleNum);
+      if (!oldArt) {
+        changes.push({
+          articleNum: newArt.articleNum,
+          oldContent: '',
+          newContent: newArt.content,
+          isNew: true
+        });
+      } else if (oldArt.content !== newArt.content) {
+        changes.push({
+          articleNum: newArt.articleNum,
+          oldContent: oldArt.content,
+          newContent: newArt.content,
+          isNew: false
+        });
+      }
+    }
+
+    if (changes.length > 0) {
+      allDiffs.push({ lawName, changes });
+    }
+
     finalArticles = finalArticles.filter(art => art.lawName !== lawName);
     finalArticles.push(...newArticles);
   }
@@ -313,8 +341,8 @@ export async function updateLawsByName(lawNamesToUpdate: string[]): Promise<LawD
 
   await fs.mkdir(path.dirname(CACHE_FILE), { recursive: true });
   await fs.writeFile(CACHE_FILE, JSON.stringify(cachedData, null, 2), 'utf-8');
-  console.error(`局部更新結束。共儲存了 ${cachedData.articles.length} 筆條文到快取中。`);
+  console.error(`局部更新結束。共儲存了 ${cachedData.articles.length} 筆條文到快取中。發現 ${allDiffs.length} 個法規有實質變動。`);
 
-  return cachedData;
+  return { updatedCache: cachedData, diffs: allDiffs };
 }
 
